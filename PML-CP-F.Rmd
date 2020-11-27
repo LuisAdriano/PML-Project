@@ -1,0 +1,185 @@
+---
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+--------------------------------------------------------
+
+# Title: "Practical Machine Learning - Course Project"
+# Predicting Quality of Activity  
+
+## Author: "Luís Adriano Domingues"
+## date: "27/11/2020"
+
+-------------------------------------------------------
+
+## Executive Summary
+
+## Considering that nowadays people regularly quantify how much of a particular activity they do, but they rarely quantify how well they do it. To explore this a group of people, using accelerometers, performed activities (lifting dumbells) in one correct and some incorrect ways - classified as mistakes. In this project, we will use data from accelerometers on the belt, forearm and arm of 6 participants in order to establish a prediction model.
+## The prediction model is used on a testing set in order to check its correctnness.
+
+--------------------------------------------------------------
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+## Loading and preliminary examination of data
+
+```{r}
+
+## cleaning memory
+rm(list = ls(all = TRUE))
+
+## setting working directory
+setwd('C:/Disco_D/LAMCD/Coursera/JHDS_course/Practical Machine Learning/Project')
+
+## loading related packages
+library(caret)
+library(knitr)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+library(corrplot)
+library(e1071)
+
+## reading data files
+trainingd <- read.csv(file="pml-training.csv")
+testingd  <- read.csv(file="pml-testing.csv")
+
+# create a partition on the training dataset and examine the data
+inTrain  <- createDataPartition(trainingd$classe, p=0.7, list=FALSE)
+dataTrain <- trainingd[inTrain, ]
+dataTest  <- trainingd[-inTrain, ]
+dim(dataTrain)
+dim(dataTest)
+## str(dataTrain)
+## head(dataTrain)
+## head (dataTest)
+
+```
+
+### Cleaning the data
+### Examining the training data set, whith str(dataTrain) we find there are 160 variables. However most variables are not usefull for the prediction model: NAs, zeros, etc. So a cleaning process is required, where we will simply eliminate those useless variables. 
+
+```{r}
+
+nearzeroV <- nearZeroVar(dataTrain)
+dataTrain <- dataTrain[, -nearzeroV]
+dataTest  <- dataTest[, -nearzeroV]
+## dim(dataTrain)
+## dim(dataTest)
+
+```
+
+### Eliminating NAs is also important.
+
+```{r}
+
+varNAs    <- sapply(dataTrain, function(x) mean(is.na(x))) > 0.95
+dataTrain <- dataTrain[, varNAs == FALSE]
+dataTest  <- dataTest[, varNAs == FALSE]
+## dim(dataTrain)
+## dim(dataTest)
+
+```
+
+### The variables which are only identifications (1:7) are also not useful for prediction and will be removed - columns 1:7.  
+
+```{r}
+
+dataTrain <- dataTrain[, -(1:7)]
+dataTest  <- dataTest[, -(1:7)]
+dim(dataTrain)
+dim(dataTest)
+## head(dataTrain)
+
+```
+
+### The modelling strategy is to build different prediction models, and them test to quantify their performances, finally select the best one to predict in the quizz test. We start by ploting a map of the correlation of the variables, to guide the selection of prediction models in the sequence.
+
+```{r}
+
+M_corr <- cor(dataTrain[, -52])
+corrplot(M_corr, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.7, tl.col = rgb(1, 1, 1))
+
+```
+
+### The higher correlations are shown in darker colours. While there are relatively few high correlations between variables, most variables have some strong correlation with some other variable, so we will keep all variables and move to build prediction models.
+### We will use 3 prediction models to compare their performances, which seems adequate - not too few, not too much. Since there are a considerable number of predictor variables we chose: Decision trees, Stochastic gradient boosting trees and Random forest decision trees.
+
+```{r}
+
+## random forests
+set.seed(271120)
+c_RF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+m_F_RF <- train(classe ~ ., data=dataTrain, method="rf",
+                          trControl=c_RF)
+m_F_RF$finalModel
+
+## decision tree
+set.seed(271120)
+m_F_DT <- rpart(classe ~ ., data=dataTrain, method="class")
+fancyRpartPlot(m_F_DT)
+
+## generalized boosted model
+set.seed(271120)
+c_GBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+m_F_GBM  <- train(classe ~ ., data=dataTrain, method = "gbm",
+                    trControl = c_GBM, verbose = FALSE)
+m_F_GBM$finalModel
+
+```
+
+### The Prediction Models have been created. The next step is to apply those models to the test section of the data partition, and then select the best model.
+
+```{r}
+
+## prediction with random forest
+p_RF <- predict(m_F_RF, newdata=dataTest)
+conf_M_RF <- confusionMatrix(p_RF, dataTest$classe)
+conf_M_RF
+
+plot(conf_M_RF$table, col = conf_M_RF$byClass, 
+    main = paste("Random Forest - Accuracy =",
+                  round(conf_M_RF$overall['Accuracy'], 4)))
+
+# prediction with decision tree
+p_DT <- predict(m_F_DT, newdata=dataTest, type="class")
+conf_M_DT <- confusionMatrix(p_DT, dataTest$classe)
+conf_M_DT
+
+plot(conf_M_DT$table, col = conf_M_DT$byClass, 
+   main = paste("Decision Tree - Accuracy =",
+                round(conf_M_DT$overall['Accuracy'], 4)))
+
+# prediction with generalized boosted model
+p_GBM <- predict(m_F_GBM, newdata=dataTest)
+conf_M_GBM <- confusionMatrix(p_GBM, dataTest$classe)
+conf_M_GBM
+
+plot(conf_M_GBM$table, col = conf_M_GBM$byClass, 
+     main = paste("GBM - Accuracy =", round(conf_M_GBM$overall['Accuracy'], 4)))
+
+```
+
+### The accuracy of the three prediction models was:
+### Random Forest: 0.996
+### Decision Tree: 0.737
+### GBM: 0.984
+
+### So we will use the Random Forest Predicition Model to answer the quizz (Testing DataSet: dataTest)
+
+```{r}
+
+predictQuizz <- predict(m_F_RF, newdata=testingd)
+predictQuizz
+
+```
+## LAMCD
